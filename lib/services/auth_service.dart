@@ -46,6 +46,7 @@ class AuthService {
         }
 
         await _saveToken(token);
+        await _setLoggedIn(true);
         await _saveUserData(payload);
         _apiService.setToken(token);
 
@@ -72,12 +73,14 @@ class AuthService {
 
       // Clear token regardless of response
       await _clearToken();
+      await _setLoggedIn(false);
       _apiService.removeToken();
 
       return response.statusCode == 200;
     } catch (e) {
       // Clear token even if API call fails
       await _clearToken();
+      await _setLoggedIn(false);
       _apiService.removeToken();
       return true;
     }
@@ -144,6 +147,15 @@ class AuthService {
   Future<String?> _getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('auth_token');
+  }
+
+  Future<String?> getToken() async {
+    return await _getToken();
+  }
+
+  Future<void> _setLoggedIn(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('isLoggedIn', value);
   }
 
   Future<void> _clearToken() async {

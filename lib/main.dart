@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:device_preview/device_preview.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:study_club_app/screens/main_screen.dart';
 import 'screens/login_screen.dart';
+import 'services/auth_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Untuk Cek Login, udah login apa blom
-  final prefs = await SharedPreferences.getInstance();
-  final isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+  final authService = AuthService();
+  await authService.initializeToken();
+  final isLoggedIn = await authService.isLoggedIn();
+
   runApp(
     DevicePreview(
       enabled: true, // ganti false untuk production

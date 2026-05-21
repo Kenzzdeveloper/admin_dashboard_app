@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:dio/dio.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:io';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -18,6 +19,53 @@ String stripHtmlTags(String html) {
   text = text.replaceAll('&quot;', '"');
   text = text.replaceAll('&#039;', "'");
   return text.trim();
+}
+
+// Helper function untuk membangun full image URL dari API
+String buildImageUrl(String? imagePath) {
+  if (imagePath == null || imagePath.isEmpty) {
+    return '';
+  }
+
+  final trimmed = imagePath.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+
+  String cleanPath = trimmed.replaceFirst(RegExp(r'^/+'), '');
+  cleanPath = cleanPath.replaceFirst(RegExp(r'^api/'), '');
+
+  if (cleanPath.startsWith('storage/app/public/')) {
+    cleanPath = cleanPath.replaceFirst('storage/app/public/', 'storage/');
+  }
+
+  if (cleanPath.startsWith('public/')) {
+    cleanPath = cleanPath.replaceFirst('public/', '');
+  }
+
+  if (cleanPath.startsWith('posts/')) {
+    return _joinUrl(ApiConstants.imageBaseUrl, 'storage/$cleanPath');
+  }
+
+  if (cleanPath.startsWith('storage/')) {
+    return _joinUrl(ApiConstants.imageBaseUrl, cleanPath);
+  }
+
+  return _joinUrl(ApiConstants.imageBaseUrl, cleanPath);
+}
+
+String _joinUrl(String base, String path) {
+  var cleanedBase = base;
+  while (cleanedBase.endsWith('/')) {
+    cleanedBase = cleanedBase.substring(0, cleanedBase.length - 1);
+  }
+
+  var cleanedPath = path;
+  while (cleanedPath.startsWith('/')) {
+    cleanedPath = cleanedPath.substring(1);
+  }
+
+  return '$cleanedBase/$cleanedPath';
 }
 
 class NewsModel {
@@ -47,7 +95,7 @@ class NewsModel {
       category: json['category'] ?? 'Update',
       author: json['author'] ?? 'Admin',
       date: json['date'] ?? '',
-      imageUrl: json['image'] ?? '',
+      imageUrl: buildImageUrl(json['image_url']),
     );
   }
 }
@@ -605,7 +653,7 @@ class _MaterialsBodyState extends State<MaterialsBody> {
   }
 }
 
-class _NewsCard extends StatelessWidget {
+class _NewsCard extends StatefulWidget {
   final NewsModel news;
   final VoidCallback onDelete;
 
@@ -613,6 +661,28 @@ class _NewsCard extends StatelessWidget {
     required this.news,
     required this.onDelete,
   });
+
+  @override
+  State<_NewsCard> createState() => _NewsCardState();
+}
+
+class _NewsCardState extends State<_NewsCard> {
+  String? _authToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAuthToken();
+  }
+
+  Future<void> _loadAuthToken() async {
+    final token = await AuthService().getToken();
+    if (mounted) {
+      setState(() {
+        _authToken = token;
+      });
+    }
+  }
 
   Color _categoryColor(String category) {
     switch (category) {
@@ -631,13 +701,13 @@ class _NewsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _categoryColor(news.category);
+    final color = _categoryColor(widget.news.category);
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => NewsDetailPage(news: news),
+            builder: (context) => NewsDetailPage(news: widget.news),
           ),
         );
       },
@@ -657,7 +727,7 @@ class _NewsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (news.imageUrl.isEmpty)
+            if (widget.news.imageUrl.isEmpty)
               Container(
                 width: double.infinity,
                 height: 150,
@@ -677,45 +747,54 @@ class _NewsCard extends StatelessWidget {
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
                 ),
-                child: Image.network(
-                  news.imageUrl,
+                child: CachedNetworkImage(
+                  imageUrl: widget.news.imageUrl,
+                  httpHeaders: _authToken != null
+                      ? {'Authorization': 'Bearer $_authToken'}
+                      : {},
                   width: double.infinity,
                   height: 150,
                   fit: BoxFit.cover,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) {
-                      return child;
-                    }
-                    return Container(
-                      width: double.infinity,
-                      height: 150,
-                      color: Colors.grey.shade200,
-                      child: const Center(
-                        child: SizedBox(
-                          width: 30,
-                          height: 30,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
+                  placeholder: (context, url) => Container(
+                    width: double.infinity,
+                    height: 150,
+                    color: Colors.grey.shade200,
+                    child: const Center(
+                      child: SizedBox(
+                        width: 30,
+                        height: 30,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                  errorWidget: (context, url, error) => Container(
+                    width: double.infinity,
+                    height: 150,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3F4F6),
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(16),
+                        topRight: Radius.circular(16),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.image_not_supported_outlined,
+                            size: 40, color: Color(0xFF9CA3AF)),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Gambar gagal dimuat',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade400,
                           ),
                         ),
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      width: double.infinity,
-                      height: 150,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF3F4F6),
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(16),
-                          topRight: Radius.circular(16),
-                        ),
-                      ),
-                      child: const Icon(Icons.image_outlined,
-                          size: 40, color: Color(0xFF9CA3AF)),
-                    );
-                  },
+                      ],
+                    ),
+                  ),
                 ),
               ),
             Padding(
@@ -732,7 +811,7 @@ class _NewsCard extends StatelessWidget {
                           color: color.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text(news.category,
+                        child: Text(widget.news.category,
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
@@ -740,20 +819,20 @@ class _NewsCard extends StatelessWidget {
                       ),
                       const Spacer(),
                       GestureDetector(
-                        onTap: onDelete,
+                        onTap: widget.onDelete,
                         child: const Icon(Icons.delete_outline,
                             color: Color(0xFFEF4444), size: 20),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text(news.title,
+                  Text(widget.news.title,
                       style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
                           color: Color(0xFF111827))),
                   const SizedBox(height: 8),
-                  Text(stripHtmlTags(news.content),
+                  Text(stripHtmlTags(widget.news.content),
                       maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -761,13 +840,13 @@ class _NewsCard extends StatelessWidget {
                   const SizedBox(height: 16),
                   Row(
                     children: [
-                      Text(news.author,
+                      Text(widget.news.author,
                           style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: Color(0xFF374151))),
                       const SizedBox(width: 12),
-                      Text(news.date,
+                      Text(widget.news.date,
                           style: const TextStyle(
                               fontSize: 12, color: Color(0xFF9CA3AF))),
                     ],
@@ -783,10 +862,32 @@ class _NewsCard extends StatelessWidget {
 }
 
 // Halaman Detail Berita
-class NewsDetailPage extends StatelessWidget {
+class NewsDetailPage extends StatefulWidget {
   final NewsModel news;
 
   const NewsDetailPage({super.key, required this.news});
+
+  @override
+  State<NewsDetailPage> createState() => _NewsDetailPageState();
+}
+
+class _NewsDetailPageState extends State<NewsDetailPage> {
+  String? _authToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAuthToken();
+  }
+
+  Future<void> _loadAuthToken() async {
+    final token = await AuthService().getToken();
+    if (mounted) {
+      setState(() {
+        _authToken = token;
+      });
+    }
+  }
 
   Color _categoryColor(String category) {
     switch (category) {
@@ -805,7 +906,7 @@ class NewsDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _categoryColor(news.category);
+    final color = _categoryColor(widget.news.category);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
@@ -834,7 +935,7 @@ class NewsDetailPage extends StatelessWidget {
               ),
             ),
             flexibleSpace: FlexibleSpaceBar(
-              background: news.imageUrl.isEmpty
+              background: widget.news.imageUrl.isEmpty
                   ? Container(
                       color: const Color(0xFF2563EB),
                       child: const Center(
@@ -845,18 +946,34 @@ class NewsDetailPage extends StatelessWidget {
                   : Stack(
                       fit: StackFit.expand,
                       children: [
-                        Image.network(
-                          news.imageUrl,
+                        CachedNetworkImage(
+                          imageUrl: widget.news.imageUrl,
+                          httpHeaders: _authToken != null
+                              ? {'Authorization': 'Bearer $_authToken'}
+                              : {},
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: const Color(0xFF2563EB),
-                              child: const Center(
-                                child: Icon(Icons.article_outlined,
-                                    size: 80, color: Colors.white70),
+                          placeholder: (context, url) => Container(
+                            color: Colors.grey.shade300,
+                            child: const Center(
+                              child: SizedBox(
+                                width: 40,
+                                height: 40,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
                               ),
-                            );
-                          },
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Container(
+                            color: const Color(0xFF2563EB),
+                            child: const Center(
+                              child: Icon(Icons.article_outlined,
+                                  size: 80, color: Colors.white70),
+                            ),
+                          ),
                         ),
                         // Gradient overlay untuk readability
                         Container(
@@ -902,13 +1019,13 @@ class NewsDetailPage extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _getCategoryIcon(news.category),
+                            _getCategoryIcon(widget.news.category),
                             size: 16,
                             color: color,
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            news.category,
+                            widget.news.category,
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -921,7 +1038,7 @@ class NewsDetailPage extends StatelessWidget {
                     const SizedBox(height: 16),
                     // Title
                     Text(
-                      news.title,
+                      widget.news.title,
                       style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w800,
@@ -944,7 +1061,7 @@ class NewsDetailPage extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              news.author,
+                              widget.news.author,
                               style: const TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -952,7 +1069,7 @@ class NewsDetailPage extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              news.date,
+                              widget.news.date,
                               style: const TextStyle(
                                 fontSize: 11,
                                 color: Color(0xFF9CA3AF),
@@ -976,7 +1093,7 @@ class NewsDetailPage extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      stripHtmlTags(news.content),
+                      stripHtmlTags(widget.news.content),
                       style: const TextStyle(
                         fontSize: 15,
                         color: Color(0xFF374151),
@@ -999,7 +1116,7 @@ class NewsDetailPage extends StatelessWidget {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              'Berita ini dipublikasikan pada ${news.date}',
+                              'Berita ini dipublikasikan pada ${widget.news.date}',
                               style: const TextStyle(
                                 fontSize: 13,
                                 color: Color(0xFF6B7280),
